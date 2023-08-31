@@ -1,0 +1,82 @@
+default:
+  tags:
+    - dalVM
+
+stages:
+  - build
+  - test
+  - sonarqube
+  - deploy
+
+cache:
+  paths:
+    - node_modules/
+
+build-project:
+  stage: build
+
+  script:
+    - cd ./frontend
+    - CI=false npm install
+    - CI=false npm run build
+
+  artifacts:
+    paths:
+      - frontend/build/
+
+test-project:
+
+  stage: test
+
+  script:
+    - cd ./backend
+    - CI=false npm install
+    - npm run coverage
+
+  artifacts:
+    paths:
+      - backend/coverage/lcov.info
+
+sonarqube-analysis:
+  stage: sonarqube
+  image:
+    name: sonarsource/sonar-scanner-cli:latest
+    entrypoint: [""]
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar" # Defines the location of the analysis task cache
+    GIT_DEPTH: "0" # Tells git to fetch all the branches of the project, required by the analysis task
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script:
+    - sonar-scanner -X -Dsonar.sources=backend -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.login=$SONAR_LOGIN -Dsonar.password=$SONAR_PASSWORD
+  # only:
+  #   - main
+  dependencies:
+    - test-project
+
+deploy_frotnend:
+  stage: deploy
+  dependencies:
+    - build-project
+  before_script:
+    - echo "$SSH_FRONTEND_PRIVATE_KEY" > id_rsa
+    - chmod 600 id_rsa
+    - ssh -o StrictHostKeyChecking=no -i id_rsa root@csci5308vm26.research.cs.dal.ca 'find /var/www/frontend -delete && mkdir /var/www/frontend/'
+  script:
+    - echo "$SSH_FRONTEND_PRIVATE_KEY" > id_rsa
+    - chmod 600 id_rsa
+    - scp -o StrictHostKeyChecking=no -i id_rsa -r frontend/build/* root@csci5308vm26.research.cs.dal.ca:/var/www/frontend/
+  after_script:
+    - echo "$SSH_FRONTEND_PRIVATE_KEY" > id_rsa
+    - chmod 600 id_rsa
+    - ssh -o StrictHostKeyChecking=no -i id_rsa root@csci5308vm26.research.cs.dal.ca 'systemctl restart nginx'
+
+deploy_backend:
+  stage: deploy
+
+  script:
+    - echo "$SSH_KEY" > id_rsa
+    - chmod 600 id_rsa
+    - ssh -o "StrictHostKeyChecking=no" -i id_rsa ubuntu@3.138.119.253 'cd group26/backend && git pull'
